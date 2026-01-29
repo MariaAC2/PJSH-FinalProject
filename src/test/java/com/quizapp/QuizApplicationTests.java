@@ -1,10 +1,10 @@
-package com.puzzleapp;
+package com.quizapp;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class PuzzleappApplicationTests {
+class QuizApplicationTests {
 
 	@Test
 	void contextLoads() {
