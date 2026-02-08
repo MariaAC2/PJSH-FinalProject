@@ -159,7 +159,7 @@ class UserServiceTest {
 
         RuntimeException ex = assertThrows(RuntimeException.class, () -> userService.deleteUser(2L));
         // your code currently says "Not allowed to update this user" even on delete
-        assertEquals("Not allowed to update this user", ex.getMessage());
+        assertEquals("Not allowed to delete this user", ex.getMessage());
 
         verify(userRepository, never()).delete(any());
     }

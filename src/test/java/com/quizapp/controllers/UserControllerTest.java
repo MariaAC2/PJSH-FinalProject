@@ -13,12 +13,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -39,6 +41,7 @@ class UserControllerTest {
     }
 
     @Test
+    @WithMockUser
     void currentUser_returnsJson() throws Exception {
         when(userService.getCurrentUser()).thenReturn(
                 new UserResponse(1L, "john@example.com", "John", UserRole.USER)
@@ -55,6 +58,7 @@ class UserControllerTest {
     }
 
     @Test
+    @WithMockUser
     void listUsers_returnsJsonArray() throws Exception {
         when(userService.listUsers()).thenReturn(List.of(
                 new UserResponse(1L, "a@x.com", "A", UserRole.USER),
@@ -71,6 +75,7 @@ class UserControllerTest {
     }
 
     @Test
+    @WithMockUser
     void getUserById_returnsJson() throws Exception {
         when(userService.getUserById(5L)).thenReturn(
                 new UserResponse(5L, "x@x.com", "X", UserRole.USER)
@@ -85,12 +90,14 @@ class UserControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = "ADMIN")
     void updateUser_returnsUpdatedJson() throws Exception {
         UserUpdateRequest req = new UserUpdateRequest("New Name", "NewPass1!");
         when(userService.updateUser(eq(7L), any(UserUpdateRequest.class)))
                 .thenReturn(new UserResponse(7L, "u@x.com", "New Name", UserRole.USER));
 
         mockMvc.perform(put("/api/users/7")
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
@@ -101,8 +108,10 @@ class UserControllerTest {
     }
 
     @Test
+    @WithMockUser(roles = "ADMIN")
     void deleteUser_callsService_andReturns200() throws Exception {
-        mockMvc.perform(delete("/api/users/9"))
+        mockMvc.perform(delete("/api/users/9")
+                        .with(csrf()))
                 .andExpect(status().isOk());
 
         verify(userService).deleteUser(9L);

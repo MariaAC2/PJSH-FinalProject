@@ -16,11 +16,9 @@ public class AuditService {
 
     @Async("auditExecutor")
     public void record(Audit audit) {
-        // ensure no exceptions escape the async thread
         try {
             auditRepository.save(audit);
         } catch (Exception ex) {
-            // log to stdout for now; in prod use a logger
             System.err.println("Failed to save audit: " + ex.getMessage());
         }
     }

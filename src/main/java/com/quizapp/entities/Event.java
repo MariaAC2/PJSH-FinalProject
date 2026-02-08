@@ -13,7 +13,7 @@ public class Event {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    private Test test;
+    private Quiz quiz;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     private User host;
@@ -43,12 +43,12 @@ public class Event {
         this.id = id;
     }
 
-    public Test getTest() {
-        return test;
+    public Quiz getQuiz() {
+        return quiz;
     }
 
-    public void setTest(Test test) {
-        this.test = test;
+    public void setQuiz(Quiz quiz) {
+        this.quiz = quiz;
     }
 
     public User getHost() {

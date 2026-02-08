@@ -11,7 +11,7 @@ public abstract class Question {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    private Test test;
+    private Quiz quiz;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
@@ -34,12 +34,12 @@ public abstract class Question {
         this.id = id;
     }
 
-    public Test getTest() {
-        return test;
+    public Quiz getQuiz() {
+        return quiz;
     }
 
-    public void setTest(Test test) {
-        this.test = test;
+    public void setQuiz(Quiz quiz) {
+        this.quiz = quiz;
     }
 
     public QuestionType getType() {

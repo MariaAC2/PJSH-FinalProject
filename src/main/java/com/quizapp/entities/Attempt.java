@@ -28,6 +28,7 @@ public class Attempt {
 
     private Instant startedAt;
     private Instant submittedAt;
+    private Instant abandonedAt;
 
     private Integer score;
     private Integer maxScore;
@@ -105,5 +106,13 @@ public class Attempt {
 
     public void setAnswers(List<Answer> answers) {
         this.answers = answers;
+    }
+
+    public Instant getAbandonedAt() {
+        return abandonedAt;
+    }
+
+    public void setAbandonedAt(Instant abandonedAt) {
+        this.abandonedAt = abandonedAt;
     }
 }

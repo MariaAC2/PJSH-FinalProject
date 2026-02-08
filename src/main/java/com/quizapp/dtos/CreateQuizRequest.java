@@ -2,10 +2,8 @@ package com.quizapp.dtos;
 
 import java.util.List;
 
-public record TestResponse(
-        Long id,
+public record CreateQuizRequest(
         String title,
         String description,
-        List<QuestionResponse> questions
-) {}
-
+        List<CreateQuestionRequest> questions
+) { }

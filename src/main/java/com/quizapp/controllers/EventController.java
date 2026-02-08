@@ -37,10 +37,28 @@ public class EventController {
         return eventService.joinEvent(req.joinCode());
     }
 
-    @PostMapping("/start/{eventId}")
+    @PostMapping("/{eventId}/start")
     @ResponseStatus(HttpStatus.OK)
     public void startEvent(@PathVariable Long eventId) {
         eventService.startEvent(eventId);
+    }
+
+    @PostMapping("/{eventId}/close")
+    @ResponseStatus(HttpStatus.OK)
+    public void closeEvent(@PathVariable Long eventId) {
+        eventService.closeEvent(eventId);
+    }
+
+    @PostMapping("/{eventId}/leave")
+    @ResponseStatus(HttpStatus.OK)
+    public void leaveEvent(@PathVariable Long eventId) {
+        eventService.leaveEvent(eventId);
+    }
+
+    @PostMapping("/{eventId}/cancel")
+    @ResponseStatus(HttpStatus.OK)
+    public void cancelEvent(@PathVariable Long eventId) {
+        eventService.cancelEvent(eventId);
     }
 
     @GetMapping("/test/{testId}")

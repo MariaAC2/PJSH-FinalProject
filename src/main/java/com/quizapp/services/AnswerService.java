@@ -4,10 +4,10 @@ import com.quizapp.audit.Auditable;
 import com.quizapp.dtos.*;
 import com.quizapp.entities.*;
 import com.quizapp.enums.AttemptStatus;
+import com.quizapp.enums.EventStatus;
 import com.quizapp.repositories.AttemptRepository;
 import com.quizapp.repositories.EventParticipantRepository;
 import com.quizapp.repositories.EventRepository;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +32,10 @@ public class AnswerService {
         this.attemptRepository = attemptRepository;
         this.userService = userService;
     }
+
+    // =========================
+    // Grading (unchanged)
+    // =========================
 
     private GradeOutcome gradeQuestion(Question q, AnswerSubmission sub, Attempt attempt) {
         if (q instanceof FreeTextQuestion ftq) return gradeFreeText(ftq, sub, attempt);
@@ -95,7 +99,6 @@ public class AnswerService {
         ca.setCorrect(correct);
         ca.setPointsAwarded(awarded);
 
-        // selections
         for (Long selId : selected) {
             Option opt = optMap.get(selId);
             if (opt != null) {
@@ -168,26 +171,46 @@ public class AnswerService {
         );
     }
 
+    // =========================
+    // Start Attempt
+    // =========================
+    @Transactional
+    @Auditable(action = "start_attempt")
+    public AttemptStartResponse startAttempt(Long eventId) {
+        AttemptContext ctx = loadAttemptContextForStart(eventId);
+
+        // 1 attempt total: if exists, block
+        if (attemptRepository.existsByParticipant(ctx.participant())) {
+            throw new IllegalStateException("Attempt already exists for this event");
+        }
+
+        Attempt attempt = new Attempt();
+        attempt.setEvent(ctx.event());
+        attempt.setParticipant(ctx.participant());
+        attempt.setStartedAt(Instant.now());
+        attempt.setStatus(AttemptStatus.IN_PROGRESS);
+
+        Attempt saved = attemptRepository.save(attempt);
+
+        return new AttemptStartResponse(saved.getId(), saved.getStatus(), ctx.event().getEndsAt());
+    }
+
+    // =========================
+    // Submit Attempt
+    // =========================
+
     @Transactional
     @Auditable(action = "submit_attempt")
     public AttemptResponse submitAttempt(Long eventId, AttemptSubmissionRequest req) {
         if (req == null || req.answers() == null) throw new IllegalArgumentException("Answers are required");
+        if (req.answers().isEmpty()) throw new IllegalArgumentException("At least one answer is required");
 
-        AttemptContext ctx = loadAttemptContext(eventId);
-        Map<Long, Question> questionsById = ctx.test().getQuestions().stream()
+        AttemptContext ctx = loadAttemptContextForSubmit(eventId); // includes status/time checks + 1-attempt rule
+
+        Map<Long, Question> questionsById = ctx.quiz().getQuestions().stream()
                 .collect(Collectors.toMap(Question::getId, q -> q));
 
-        Map<Long, AnswerSubmission> byQ = new HashMap<>();
-        for (AnswerSubmission a : req.answers()) {
-            if (a == null || a.questionId() == null) continue;
-
-            if (!questionsById.containsKey(a.questionId())) {
-                throw new IllegalArgumentException("Invalid questionId: " + a.questionId());
-            }
-            if (byQ.putIfAbsent(a.questionId(), a) != null) {
-                throw new IllegalArgumentException("Duplicate answer for questionId: " + a.questionId());
-            }
-        }
+        Map<Long, AnswerSubmission> byQ = submissionsByQuestionId(req, questionsById);
 
         Attempt attempt = newSubmittedAttempt(ctx.event(), ctx.participant());
 
@@ -195,7 +218,7 @@ public class AnswerService {
         int totalScore = 0;
         List<AnswerResult> results = new ArrayList<>();
 
-        for (Question q : ctx.test().getQuestions()) {
+        for (Question q : ctx.quiz().getQuestions()) {
             totalMax += q.getPoints();
 
             GradeOutcome outcome = gradeQuestion(q, byQ.get(q.getId()), attempt);
@@ -212,164 +235,53 @@ public class AnswerService {
         return new AttemptResponse(saved.getId(), saved.getScore(), saved.getMaxScore(), saved.getStatus(), results);
     }
 
+    @Transactional
+    @Auditable(action = "cancel_attempt")
+    public void cancelAttempt(Long eventId) {
+        AttemptContext ctx = loadAttemptContextBase(eventId); // must be RUNNING etc.
 
-//    @Transactional
-//    @Auditable(action = "submit_attempt")
-//    public AttemptResponse submitAttempt(Long eventId, AttemptSubmissionRequest req) {
-//        if (req == null || req.answers() == null) throw new IllegalArgumentException("Answers are required");
-//
-//        Event event = eventRepository.findById(eventId)
-//                .orElseThrow(() -> new IllegalArgumentException("Event not found"));
-//
-//        // Authenticated user required
-//        User currentUser = userService.getAuthenticatedUserEntity();
-//
-//        EventParticipant participant = participantRepository.findByEventAndUser(event, currentUser)
-//                .orElseThrow(() -> new IllegalArgumentException("Participant not found for this user and event"));
-//
-//        Test test = event.getTest();
-//        if (test == null) throw new IllegalStateException("Event has no test attached");
-//
-//        // map submitted answers by questionId for quick lookup
-//        Map<Long, AnswerSubmission> byQ = new HashMap<>();
-//        for (AnswerSubmission a : req.answers()) {
-//            if (a == null || a.questionId() == null) continue;
-//            byQ.put(a.questionId(), a);
-//        }
-//
-//        Attempt attempt = new Attempt();
-//        attempt.setEvent(event);
-//        attempt.setParticipant(participant);
-//        attempt.setStartedAt(Instant.now());
-//        attempt.setSubmittedAt(Instant.now());
-//        attempt.setStatus(AttemptStatus.SUBMITTED);
-//
-//        int totalMax = 0;
-//        int totalScore = 0;
-//        List<AnswerResult> results = new ArrayList<>();
-//
-//        for (Question q : test.getQuestions()) {
-//            int qPoints = q.getPoints();
-//            totalMax += qPoints;
-//            AnswerSubmission sub = byQ.get(q.getId());
-//
-//            if (q instanceof FreeTextQuestion ftq) {
-//                String answerText = (sub != null) ? sub.textAnswer() : null;
-//                boolean correct = false;
-//                if (answerText != null) {
-//                    String correctText = ftq.getCorrectAnswer();
-//                    if (correctText != null) {
-//                        if (ftq.isCaseSensitive()) {
-//                            correct = correctText.equals(answerText.trim());
-//                        } else {
-//                            correct = correctText.equalsIgnoreCase(answerText.trim());
-//                        }
-//                    }
-//                }
-//
-//                TextAnswer ta = new TextAnswer();
-//                ta.setAttempt(attempt);
-//                ta.setQuestion(q);
-//                ta.setAnswerText(answerText);
-//                ta.setCorrect(correct);
-//                ta.setPointsAwarded(correct ? qPoints : 0);
-//                attempt.getAnswers().add(ta);
-//
-//                totalScore += (correct ? qPoints : 0);
-//                results.add(new AnswerResult(q.getId(), correct, correct ? qPoints : 0));
-//
-//            } else if (q instanceof ChoiceQuestion cq) {
-//                // build map of optionId -> Option & collect correct option ids
-//                Map<Long, Option> optMap = cq.getOptions().stream().collect(Collectors.toMap(Option::getId, o -> o));
-//                Set<Long> correctOptionIds = cq.getOptions().stream().filter(Option::isCorrect).map(Option::getId).collect(Collectors.toSet());
-//
-//                Set<Long> selected = (sub != null && sub.selectedOptionIds() != null) ? new HashSet<>(sub.selectedOptionIds()) : Collections.emptySet();
-//
-//                // Single choice: full points when selected correct option
-//                if (q instanceof SingleChoiceQuestion) {
-//                    int awarded = 0;
-//                    boolean correct = false;
-//                    if (selected.size() == 1) {
-//                        Long chosen = selected.iterator().next();
-//                        Option opt = optMap.get(chosen);
-//                        if (opt != null && opt.isCorrect()) {
-//                            awarded = qPoints;
-//                            correct = true;
-//                        }
-//                    }
-//
-//                    ChoiceAnswer ca = new ChoiceAnswer();
-//                    ca.setAttempt(attempt);
-//                    ca.setQuestion(q);
-//                    ca.setCorrect(correct);
-//                    ca.setPointsAwarded(awarded);
-//                    attempt.getAnswers().add(ca);
-//
-//                    // add selections
-//                    for (Long selId : selected) {
-//                        Option opt = optMap.get(selId);
-//                        if (opt != null) {
-//                            ChoiceAnswerSelection sel = new ChoiceAnswerSelection();
-//                            sel.setAnswer(ca);
-//                            sel.setOption(opt);
-//                            ca.getSelections().add(sel);
-//                        }
-//                    }
-//
-//                    totalScore += awarded;
-//                    results.add(new AnswerResult(q.getId(), correct, awarded));
-//
-//                } else if (q instanceof MultipleChoiceQuestion) {
-//                    // Partial credit policy: correctSelected - incorrectSelected, normalized by correctCount
-//                    int correctCount = correctOptionIds.size();
-//                    int correctSelected = 0;
-//                    int incorrectSelected = 0;
-//                    for (Long sel : selected) {
-//                        Option opt = optMap.get(sel);
-//                        if (opt == null) continue; // ignore invalid ids
-//                        if (opt.isCorrect()) correctSelected++; else incorrectSelected++;
-//                    }
-//                    int raw = Math.max(0, correctSelected - incorrectSelected);
-//                    int awarded = 0;
-//                    if (correctCount > 0) {
-//                        double frac = (double) raw / (double) correctCount;
-//                        awarded = (int) Math.round(frac * qPoints);
-//                    }
-//
-//                    ChoiceAnswer ca = new ChoiceAnswer();
-//                    ca.setAttempt(attempt);
-//                    ca.setQuestion(q);
-//                    ca.setCorrect(awarded == qPoints);
-//                    ca.setPointsAwarded(awarded);
-//                    attempt.getAnswers().add(ca);
-//
-//                    for (Long selId : selected) {
-//                        Option opt = optMap.get(selId);
-//                        if (opt != null) {
-//                            ChoiceAnswerSelection sel = new ChoiceAnswerSelection();
-//                            sel.setAnswer(ca);
-//                            sel.setOption(opt);
-//                            ca.getSelections().add(sel);
-//                        }
-//                    }
-//
-//                    totalScore += awarded;
-//                    results.add(new AnswerResult(q.getId(), awarded == qPoints, awarded));
-//                }
-//            }
-//        }
-//
-//        attempt.setMaxScore(totalMax);
-//        attempt.setScore(totalScore);
-//
-//        Attempt saved = attemptRepository.save(attempt);
-//
-//        return new AttemptResponse(saved.getId(), saved.getScore(), saved.getMaxScore(), saved.getStatus(), results);
-//    }
+        Attempt attempt = attemptRepository.findByParticipant(ctx.participant())
+                .orElseThrow(() -> new IllegalStateException("Attempt not started"));
 
-    private AttemptContext loadAttemptContext(Long eventId) {
+        if (attempt.getStatus() == AttemptStatus.SUBMITTED)
+            throw new IllegalStateException("Attempt already submitted");
+
+        if (attempt.getStatus() == AttemptStatus.ABANDONED)
+            return;
+
+        attempt.setStatus(AttemptStatus.ABANDONED);
+        attempt.setAbandonedAt(Instant.now());
+    }
+
+    private static Map<Long, AnswerSubmission> submissionsByQuestionId(
+            AttemptSubmissionRequest req,
+            Map<Long, Question> questionsById
+    ) {
+        Map<Long, AnswerSubmission> byQ = new HashMap<>();
+
+        for (AnswerSubmission a : req.answers()) {
+            if (a == null || a.questionId() == null) continue;
+
+            if (!questionsById.containsKey(a.questionId())) {
+                throw new IllegalArgumentException("Invalid questionId: " + a.questionId());
+            }
+            if (byQ.putIfAbsent(a.questionId(), a) != null) {
+                throw new IllegalArgumentException("Duplicate answer for questionId: " + a.questionId());
+            }
+        }
+
+        return byQ;
+    }
+
+    // =========================
+    // Context / lifecycle checks
+    // =========================
+
+    private AttemptContext loadAttemptContextBase(Long eventId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new IllegalArgumentException("Event not found"));
+
+        enforceEventIsAcceptingSubmissions(event);
 
         User currentUser = userService.getAuthenticatedUserEntity();
 
@@ -377,13 +289,87 @@ public class AnswerService {
                 .findByEventAndUser(event, currentUser)
                 .orElseThrow(() -> new IllegalArgumentException("Participant not found for this user and event"));
 
-        Test test = event.getTest();
-        if (test == null) {
-            throw new IllegalStateException("Event has no test attached");
+        Quiz quiz = event.getQuiz();
+        if (quiz == null) throw new IllegalStateException("Event has no quiz attached");
+
+        return new AttemptContext(event, participant, quiz);
+    }
+
+    private AttemptContext loadAttemptContextForStart(Long eventId) {
+        AttemptContext ctx = loadAttemptContextBase(eventId);
+
+        if (attemptRepository.existsByParticipant(ctx.participant())) {
+            throw new IllegalStateException("Attempt already exists for this event");
         }
 
-        return new AttemptContext(event, participant, test);
+        return ctx;
     }
+
+    private AttemptContext loadAttemptContextForSubmit(Long eventId) {
+        AttemptContext ctx = loadAttemptContextBase(eventId);
+
+        Attempt attempt = attemptRepository.findByParticipant(ctx.participant())
+                .orElseThrow(() -> new IllegalStateException("Attempt not started"));
+
+        if (attempt.getStatus() == AttemptStatus.SUBMITTED) {
+            throw new IllegalStateException("Attempt already submitted");
+        }
+        if (attempt.getStatus() == AttemptStatus.ABANDONED) {
+            throw new IllegalStateException("Attempt was abandoned");
+        }
+        if (attempt.getStatus() != AttemptStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Attempt is not in progress");
+        }
+
+        return ctx;
+    }
+
+
+    private void enforceEventIsAcceptingSubmissions(Event event) {
+        // clearer message for cancellation
+        if (event.getStatus() == EventStatus.CANCELLED) {
+            throw new IllegalStateException("Event was cancelled");
+        }
+
+        // lazy auto-close by time (updates DB state within the current transaction)
+        autoCloseIfExpired(event);
+
+        // after auto-close, RUNNING is the only acceptable status
+        if (event.getStatus() != EventStatus.RUNNING) {
+            throw new IllegalStateException("Event is not running");
+        }
+
+        // sanity: RUNNING events should have timing initialized by startEvent()
+        if (event.getStartsAt() == null || event.getEndsAt() == null) {
+            throw new IllegalStateException("Event timing is not initialized");
+        }
+
+        Instant now = Instant.now();
+
+        // if system clock or data got weird
+        if (now.isBefore(event.getStartsAt())) {
+            throw new IllegalStateException("Event has not started yet");
+        }
+
+        // defensive: in theory autoCloseIfExpired already handled this; keep for clarity
+        if (!now.isBefore(event.getEndsAt())) {
+            event.setStatus(EventStatus.CLOSED);
+            throw new IllegalStateException("Event has ended");
+        }
+    }
+
+    private void autoCloseIfExpired(Event event) {
+        Instant endsAt = event.getEndsAt();
+        if (event.getStatus() == EventStatus.RUNNING
+                && endsAt != null
+                && !Instant.now().isBefore(endsAt)) {
+            event.setStatus(EventStatus.CLOSED);
+        }
+    }
+
+    // =========================
+    // Attempt creation
+    // =========================
 
     private Attempt newSubmittedAttempt(Event event, EventParticipant participant) {
         Attempt attempt = new Attempt();
@@ -397,4 +383,12 @@ public class AnswerService {
 
         return attempt;
     }
+
+    // =========================
+    // Helper record (keep it inside the service)
+    // =========================
+
+    private record AttemptContext(Event event, EventParticipant participant, Quiz quiz) {}
+
+    // GradeOutcome is assumed to exist already as you have it
 }

@@ -5,7 +5,7 @@ import com.quizapp.dtos.*;
 import com.quizapp.entities.*;
 import com.quizapp.enums.QuestionType;
 import com.quizapp.enums.UserRole;
-import com.quizapp.repositories.TestRepository;
+import com.quizapp.repositories.QuizRepository;
 import com.quizapp.repositories.UserRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,14 +17,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Service
-public class TestService {
+public class QuizService {
 
-    private final TestRepository testRepository;
+    private final QuizRepository quizRepository;
     private final UserRepository userRepository;
     private final UserService userService;
 
-    public TestService(TestRepository testRepository, UserRepository userRepository, UserService userService) {
-        this.testRepository = testRepository;
+    public QuizService(QuizRepository quizRepository, UserRepository userRepository, UserService userService) {
+        this.quizRepository = quizRepository;
         this.userRepository = userRepository;
         this.userService = userService;
     }
@@ -33,97 +33,97 @@ public class TestService {
     @Transactional
     @PreAuthorize("isAuthenticated()")
     @Auditable(action = "create_test")
-    public TestResponse createTest(CreateTestRequest req) {
-        validateCreateTestRequest(req);
+    public QuizResponse createQuiz(CreateQuizRequest req) {
+        validateCreateQuizRequest(req);
 
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         User owner = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Authenticated user not found in DB"));
 
-        Test test = new Test();
-        test.setTitle(req.title().trim());
-        test.setDescription(req.description());
+        Quiz quiz = new Quiz();
+        quiz.setTitle(req.title().trim());
+        quiz.setDescription(req.description());
 
-        test.setOwner(owner);
+        quiz.setOwner(owner);
 
         // Build questions (and options) in-memory
         int position = 0;
         for (CreateQuestionRequest qReq : req.questions()) {
             Question q = mapQuestion(qReq, position);
             // important: link both sides
-            q.setTest(test);
-            test.getQuestions().add(q);
+            q.setQuiz(quiz);
+            quiz.getQuestions().add(q);
             position++;
         }
 
         // Save aggregate root; cascade should save children
-        Test saved = testRepository.save(test);
+        Quiz saved = quizRepository.save(quiz);
 
         return toResponse(saved);
     }
 
     /// Get a single test by ID
     @PreAuthorize("isAuthenticated()")
-    public TestResponse getTest(Long id) {
-        Test test = testRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test not found"));
-        return toResponse(test);
+    public QuizResponse getQuiz(Long id) {
+        Quiz quiz = quizRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quiz not found"));
+        return toResponse(quiz);
     }
 
     /// Replace title/description/questions. Only owner or ADMIN allowed.
     @Transactional
     @PreAuthorize("isAuthenticated()")
-    public TestResponse updateTest(Long id, CreateTestRequest req) {
-        validateCreateTestRequest(req);
+    public QuizResponse updateQuiz(Long id, CreateQuizRequest req) {
+        validateCreateQuizRequest(req);
 
-        Test test = testRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test not found"));
+        Quiz quiz = quizRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quiz not found"));
 
         User user = userService.getAuthenticatedUserEntity();
-        if (isOwnerOrAdmin(test, user)) {
-            throw new AccessDeniedException("Only the test owner or an admin can update the test");
+        if (!isOwnerOrAdmin(quiz, user)) {
+            throw new AccessDeniedException("Only the quiz owner or an admin can update the quiz");
         }
 
-        test.setTitle(req.title().trim());
-        test.setDescription(req.description());
+        quiz.setTitle(req.title().trim());
+        quiz.setDescription(req.description());
 
         // remove existing questions (orphanRemoval = true) and add new ones from request
-        test.getQuestions().clear();
+        quiz.getQuestions().clear();
         int position = 0;
         for (CreateQuestionRequest qReq : req.questions()) {
             Question q = mapQuestion(qReq, position);
-            q.setTest(test);
-            test.getQuestions().add(q);
+            q.setQuiz(quiz);
+            quiz.getQuestions().add(q);
             position++;
         }
 
-        Test saved = testRepository.save(test);
+        Quiz saved = quizRepository.save(quiz);
         return toResponse(saved);
     }
 
     /// Delete test by ID. Only owner or ADMIN allowed.
     @Transactional
     @PreAuthorize("isAuthenticated()")
-    public void deleteTest(Long id) {
-        Test test = testRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Test not found"));
+    public void deleteQuiz(Long id) {
+        Quiz quiz = quizRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Quiz not found"));
 
         User user = userService.getAuthenticatedUserEntity();
-        if (isOwnerOrAdmin(test, user)) {
-            throw new AccessDeniedException("Only the test owner or an admin can delete the test");
+        if (isOwnerOrAdmin(quiz, user)) {
+            throw new AccessDeniedException("Only the quiz owner or an admin can delete the quiz");
         }
 
-        testRepository.delete(test);
+        quizRepository.delete(quiz);
     }
 
-    private boolean isOwnerOrAdmin(Test test, User user) {
-        if (user == null) return true;
-        if (user.getRole() == UserRole.ADMIN) return false;
-        return test.getOwner() == null || test.getOwner().getId() == null || !test.getOwner().getId().equals(user.getId());
+    private boolean isOwnerOrAdmin(Quiz quiz, User user) {
+        if (user == null) return false;
+        if (user.getRole() == UserRole.ADMIN) return true;
+        return quiz.getOwner() != null && quiz.getOwner().getId() != null && quiz.getOwner().getId().equals(user.getId());
     }
 
     /// Validation and mapping helpers
-    private void validateCreateTestRequest(CreateTestRequest req) {
+    private void validateCreateQuizRequest(CreateQuizRequest req) {
         if (req == null) throw new IllegalArgumentException("Request is required");
         if (req.title() == null || req.title().trim().isEmpty())
             throw new IllegalArgumentException("Title is required");
@@ -228,9 +228,9 @@ public class TestService {
         return result;
     }
 
-    private TestResponse toResponse(Test test) {
+    private QuizResponse toResponse(Quiz quiz) {
         List<QuestionResponse> qs = new ArrayList<>();
-        for (Question q : test.getQuestions()) {
+        for (Question q : quiz.getQuestions()) {
             List<OptionResponse> opts = getOptionResponses(q);
 
             // For free-text questions we want to expose the correct answer and case sensitivity
@@ -253,7 +253,7 @@ public class TestService {
             ));
         }
 
-        return new TestResponse(test.getId(), test.getTitle(), test.getDescription(), qs);
+        return new QuizResponse(quiz.getId(), quiz.getTitle(), quiz.getDescription(), qs);
     }
 
     private static List<OptionResponse> getOptionResponses(Question q) {

@@ -10,9 +10,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -25,25 +27,29 @@ class AuthControllerTest {
     @MockBean AuthService authService;
 
     @Test
+    @WithMockUser
     void register_returns201_andCallsService() throws Exception {
         RegisterRequest req = new RegisterRequest("john@example.com", "John", "Passw0rd!");
 
         mockMvc.perform(post("/api/auth/register")
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isCreated())
-                .andExpect(content().string("")); // void endpoint, empty body
+                .andExpect(content().string(""));
 
         verify(authService).register(any(RegisterRequest.class));
         verifyNoMoreInteractions(authService);
     }
 
     @Test
+    @WithMockUser
     void login_returnsTokenJson() throws Exception {
         LoginRequest req = new LoginRequest("john@example.com", "Passw0rd!");
         when(authService.login(any(LoginRequest.class))).thenReturn(new TokenResponse("TOKEN_ABC"));
 
         mockMvc.perform(post("/api/auth/login")
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())

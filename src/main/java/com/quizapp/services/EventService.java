@@ -5,13 +5,13 @@ import com.quizapp.dtos.CreateEventRequest;
 import com.quizapp.dtos.EventResponse;
 import com.quizapp.entities.Event;
 import com.quizapp.entities.EventParticipant;
-import com.quizapp.entities.Test;
+import com.quizapp.entities.Quiz;
 import com.quizapp.entities.User;
 import com.quizapp.enums.EventStatus;
 import com.quizapp.enums.UserRole;
 import com.quizapp.repositories.EventParticipantRepository;
 import com.quizapp.repositories.EventRepository;
-import com.quizapp.repositories.TestRepository;
+import com.quizapp.repositories.QuizRepository;
 import com.quizapp.repositories.UserRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -27,16 +27,16 @@ import java.util.stream.Collectors;
 public class EventService {
 
     private final EventRepository eventRepository;
-    private final TestRepository testRepository;
+    private final QuizRepository quizRepository;
     private final UserRepository userRepository;
     private final EventParticipantRepository participantRepository;
     private final UserService userService;
 
     public EventService(EventRepository eventRepository,
-                        TestRepository testRepository,
+                        QuizRepository quizRepository,
                         UserRepository userRepository, EventParticipantRepository participantRepository, UserService userService) {
         this.eventRepository = eventRepository;
-        this.testRepository = testRepository;
+        this.quizRepository = quizRepository;
         this.userRepository = userRepository;
         this.participantRepository = participantRepository;
         this.userService = userService;
@@ -56,20 +56,20 @@ public class EventService {
         if (req.joinClosesAt() != null && req.joinClosesAt().isBefore(Instant.now()))
             throw new IllegalArgumentException("joinClosesAt must be in the future");
 
-        Test test = testRepository.findById(req.testId())
-                .orElseThrow(() -> new IllegalArgumentException("Test not found"));
+        Quiz quiz = quizRepository.findById(req.testId())
+                .orElseThrow(() -> new IllegalArgumentException("Quiz not found"));
 
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
         User host = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Authenticated user not found in DB"));
 
-        if (!(test.getOwner() != null && test.getOwner().getId() != null && test.getOwner().getId().equals(host.getId()))
+        if (!(quiz.getOwner() != null && quiz.getOwner().getId() != null && quiz.getOwner().getId().equals(host.getId()))
                 && host.getRole() != UserRole.ADMIN) {
-            throw new AccessDeniedException("Only the test owner or an admin can create events");
+            throw new AccessDeniedException("Only the quiz owner or an admin can create events");
         }
 
         Event e = new Event();
-        e.setTest(test);
+        e.setQuiz(quiz);
         e.setHost(host);
         e.setName(req.name().trim());
         e.setDurationSeconds(duration);
@@ -130,8 +130,8 @@ public class EventService {
 
         User currentUser = userService.getAuthenticatedUserEntity();
 
-        if (!event.getHost().getId().equals(currentUser.getId())) {
-            throw new AccessDeniedException("Only the host can start own event");
+        if (!event.getHost().getId().equals(currentUser.getId()) && currentUser.getRole() != UserRole.ADMIN) {
+            throw new AccessDeniedException("Only the host or admin can start event");
         }
 
         if (event.getStatus() != EventStatus.OPEN)
@@ -147,6 +147,75 @@ public class EventService {
         event.setStartsAt(now);
         event.setEndsAt(now.plusSeconds(event.getDurationSeconds()));
         event.setJoinClosesAt(now);
+    }
+
+    @Transactional
+    @Auditable(action = "close_event")
+    @PreAuthorize("isAuthenticated()")
+    public void closeEvent(Long eventId) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("Event not found"));
+
+        User currentUser = userService.getAuthenticatedUserEntity();
+
+        if (!event.getHost().getId().equals(currentUser.getId()) && currentUser.getRole() != UserRole.ADMIN) {
+            throw new AccessDeniedException("Only the host or admin can close event");
+        }
+
+        if (event.getStatus() == EventStatus.CLOSED || event.getStatus() == EventStatus.CANCELLED) {
+            return;
+        }
+
+        event.setStatus(EventStatus.CLOSED);
+        event.setEndsAt(Instant.now());
+        event.setJoinClosesAt(Instant.now());
+    }
+
+    @Transactional
+    @Auditable(action = "leave_event")
+    @PreAuthorize("isAuthenticated()")
+    public void leaveEvent(Long eventId) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("Event not found"));
+
+        if (event.getStatus() != EventStatus.OPEN) {
+            throw new IllegalStateException("You can only leave before the event starts");
+        }
+
+        User user = userService.getAuthenticatedUserEntity();
+
+        EventParticipant p = participantRepository.findByEventAndUser(event, user)
+                .orElseThrow(() -> new IllegalArgumentException("Not joined"));
+
+        participantRepository.delete(p);
+    }
+
+    @Transactional
+    @Auditable(action = "cancel_event")
+    @PreAuthorize("isAuthenticated()")
+    public void cancelEvent(Long eventId) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("Event not found"));
+
+        User currentUser = userService.getAuthenticatedUserEntity();
+
+        if (!event.getHost().getId().equals(currentUser.getId()) && currentUser.getRole() != UserRole.ADMIN) {
+            throw new AccessDeniedException("Only the host or admin can cancel event");
+        }
+
+        if (event.getStatus() == EventStatus.CANCELLED) {
+            return;
+        }
+        if (event.getStatus() == EventStatus.CLOSED) {
+            throw new IllegalStateException("Cannot cancel a closed event");
+        }
+
+        Instant now = Instant.now();
+
+        event.setStatus(EventStatus.CANCELLED);
+        event.setJoinClosesAt(now);
+
+        event.setEndsAt(now);
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -166,7 +235,7 @@ public class EventService {
     public List<EventResponse> listEventsForTest(Long testId) {
         List<Event> events = eventRepository.findAll();
         return events.stream()
-                .filter(ev -> ev.getTest() != null && ev.getTest().getId() != null && ev.getTest().getId().equals(testId))
+                .filter(ev -> ev.getQuiz() != null && ev.getQuiz().getId() != null && ev.getQuiz().getId().equals(testId))
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
@@ -174,7 +243,7 @@ public class EventService {
     private EventResponse toResponse(Event e) {
         return new EventResponse(
                 e.getId(),
-                e.getTest() != null ? e.getTest().getId() : null,
+                e.getQuiz() != null ? e.getQuiz().getId() : null,
                 e.getName(),
                 e.getJoinCode(),
                 e.getStartsAt(),
