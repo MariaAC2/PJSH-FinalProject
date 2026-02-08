@@ -16,17 +16,17 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
-public class AnswerService {
+public class AttemptService {
 
     private final EventRepository eventRepository;
     private final EventParticipantRepository participantRepository;
     private final AttemptRepository attemptRepository;
     private final UserService userService;
 
-    public AnswerService(EventRepository eventRepository,
-                         EventParticipantRepository participantRepository,
-                         AttemptRepository attemptRepository,
-                         UserService userService) {
+    public AttemptService(EventRepository eventRepository,
+                          EventParticipantRepository participantRepository,
+                          AttemptRepository attemptRepository,
+                          UserService userService) {
         this.eventRepository = eventRepository;
         this.participantRepository = participantRepository;
         this.attemptRepository = attemptRepository;
@@ -389,6 +389,4 @@ public class AnswerService {
     // =========================
 
     private record AttemptContext(Event event, EventParticipant participant, Quiz quiz) {}
-
-    // GradeOutcome is assumed to exist already as you have it
 }

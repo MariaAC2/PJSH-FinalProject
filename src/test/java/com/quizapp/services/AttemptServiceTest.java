@@ -6,6 +6,7 @@ import com.quizapp.dtos.AttemptResponse;
 import com.quizapp.dtos.AttemptSubmissionRequest;
 import com.quizapp.entities.*;
 import com.quizapp.enums.AttemptStatus;
+import com.quizapp.enums.EventStatus;
 import com.quizapp.repositories.AttemptRepository;
 import com.quizapp.repositories.EventParticipantRepository;
 import com.quizapp.repositories.EventRepository;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,61 +23,173 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class AnswerServiceTest {
+class AttemptServiceTest {
 
     @Mock EventRepository eventRepository;
     @Mock EventParticipantRepository participantRepository;
     @Mock AttemptRepository attemptRepository;
     @Mock UserService userService;
 
-    @InjectMocks AnswerService answerService;
+    @InjectMocks
+    AttemptService attemptService;
 
     @Captor ArgumentCaptor<Attempt> attemptCaptor;
 
     @Test
     void submitAttempt_whenAnswersMissing_throws() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> answerService.submitAttempt(1L, null));
+                () -> attemptService.submitAttempt(1L, null));
 
         assertEquals("Answers are required", ex.getMessage());
         verifyNoInteractions(eventRepository, participantRepository, attemptRepository, userService);
     }
 
     @Test
-    void submitAttempt_whenQuestionIdInvalid_throws() {
+    void submitAttempt_whenEventMissing_throws() {
+        when(eventRepository.findById(44L)).thenReturn(Optional.empty());
+
+        AttemptSubmissionRequest req = new AttemptSubmissionRequest(List.of(
+                new AnswerSubmission(1L, null, "Paris")
+        ));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> attemptService.submitAttempt(44L, req));
+
+        assertEquals("Event not found", ex.getMessage());
+        verifyNoInteractions(participantRepository, attemptRepository, userService);
+    }
+
+    @Test
+    void submitAttempt_whenParticipantMissing_throws() {
         Event event = new Event();
         event.setId(10L);
-        Test test = buildTestWithQuestions(List.of(freeTextQuestion(1L, 2, "Paris", false)));
-        event.setTest(test);
+
+        event.setStatus(EventStatus.RUNNING);
+        Instant now = Instant.now();
+        event.setStartsAt(now.minusSeconds(60));
+        event.setEndsAt(now.plusSeconds(600));
+
+        event.setQuiz(buildQuizWithQuestions(
+                List.of(freeTextQuestion(1L, 2, "Paris", false))
+        ));
+
+        User user = new User();
+        user.setId(1L);
+
+        when(eventRepository.findById(10L)).thenReturn(Optional.of(event));
+        when(userService.getAuthenticatedUserEntity()).thenReturn(user);
+
+        when(participantRepository.findByEventAndUser(event, user))
+                .thenReturn(Optional.empty());
+
+        AttemptSubmissionRequest req = new AttemptSubmissionRequest(List.of(
+                new AnswerSubmission(1L, null, "Paris")
+        ));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> attemptService.submitAttempt(10L, req));
+
+        assertEquals("Participant not found for this user and event", ex.getMessage());
+
+        // It must fail before touching attempts
+        verify(attemptRepository, never()).save(any());
+    }
+
+    @Test
+    void submitAttempt_whenQuizMissing_throws() {
+        Event event = new Event();
+        event.setId(12L);
+
+        event.setStatus(EventStatus.RUNNING);
+        Instant now = Instant.now();
+        event.setStartsAt(now.minusSeconds(60));
+        event.setEndsAt(now.plusSeconds(600));
+
+        event.setQuiz(null);
 
         User user = new User();
         EventParticipant participant = new EventParticipant();
         participant.setEvent(event);
         participant.setUser(user);
 
-        when(eventRepository.findById(10L)).thenReturn(Optional.of(event));
+        when(eventRepository.findById(12L)).thenReturn(Optional.of(event));
         when(userService.getAuthenticatedUserEntity()).thenReturn(user);
         when(participantRepository.findByEventAndUser(event, user)).thenReturn(Optional.of(participant));
 
-        AttemptSubmissionRequest req = new AttemptSubmissionRequest(
-                List.of(new AnswerSubmission(99L, null, "Paris"))
-        );
+        AttemptSubmissionRequest req = new AttemptSubmissionRequest(List.of(
+                new AnswerSubmission(1L, null, "Paris")
+        ));
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> answerService.submitAttempt(10L, req));
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> attemptService.submitAttempt(12L, req));
 
-        assertEquals("Invalid questionId: 99", ex.getMessage());
+        assertEquals("Event has no quiz attached", ex.getMessage());
+
         verifyNoInteractions(attemptRepository);
     }
 
     @Test
-    void submitAttempt_whenDuplicateQuestionId_throws() {
+    void submitAttempt_whenQuestionIdInvalid_throws() {
         Event event = new Event();
-        event.setId(11L);
-        Test test = buildTestWithQuestions(List.of(freeTextQuestion(1L, 2, "Paris", false)));
-        event.setTest(test);
+        event.setId(13L);
+
+        event.setStatus(EventStatus.RUNNING);
+        Instant now = Instant.now();
+        event.setStartsAt(now.minusSeconds(60));
+        event.setEndsAt(now.plusSeconds(600));
+
+        Quiz quiz = buildQuizWithQuestions(List.of(
+                freeTextQuestion(1L, 2, "Paris", false)
+        ));
+        event.setQuiz(quiz);
 
         User user = new User();
+        user.setId(1L);
+
+        EventParticipant participant = new EventParticipant();
+        participant.setEvent(event);
+        participant.setUser(user);
+
+        when(eventRepository.findById(13L)).thenReturn(Optional.of(event));
+        when(userService.getAuthenticatedUserEntity()).thenReturn(user);
+        when(participantRepository.findByEventAndUser(event, user)).thenReturn(Optional.of(participant));
+
+        Attempt existing = new Attempt();
+        existing.setStatus(AttemptStatus.IN_PROGRESS);
+        when(attemptRepository.findByParticipant(participant)).thenReturn(Optional.of(existing));
+
+        AttemptSubmissionRequest req = new AttemptSubmissionRequest(
+                List.of(new AnswerSubmission(99L, null, "Paris")) // invalid id
+        );
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> attemptService.submitAttempt(13L, req));
+
+        assertEquals("Invalid questionId: 99", ex.getMessage());
+
+        // It should fail before saving
+        verify(attemptRepository, never()).save(any());
+    }
+
+    @Test
+    void submitAttempt_whenDuplicateQuestionId_throws() {
+        // quiz with question id=1
+        Quiz quiz = buildQuizWithQuestions(List.of(
+                freeTextQuestion(1L, 2, "Paris", false)
+        ));
+
+        Event event = new Event();
+        event.setId(11L);
+        event.setQuiz(quiz);
+        event.setStatus(EventStatus.RUNNING);
+
+        Instant now = Instant.now();
+        event.setStartsAt(now.minusSeconds(60));
+        event.setEndsAt(now.plusSeconds(600));
+
+        User user = new User();
+        user.setId(1L);
+
         EventParticipant participant = new EventParticipant();
         participant.setEvent(event);
         participant.setUser(user);
@@ -84,16 +198,22 @@ class AnswerServiceTest {
         when(userService.getAuthenticatedUserEntity()).thenReturn(user);
         when(participantRepository.findByEventAndUser(event, user)).thenReturn(Optional.of(participant));
 
+        Attempt existing = new Attempt();
+        existing.setStatus(AttemptStatus.IN_PROGRESS);
+        when(attemptRepository.findByParticipant(participant)).thenReturn(Optional.of(existing));
+
         AttemptSubmissionRequest req = new AttemptSubmissionRequest(List.of(
                 new AnswerSubmission(1L, null, "Paris"),
-                new AnswerSubmission(1L, null, "Paris")
+                new AnswerSubmission(1L, null, "Paris") // duplicate
         ));
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> answerService.submitAttempt(11L, req));
+                () -> attemptService.submitAttempt(11L, req));
 
         assertEquals("Duplicate answer for questionId: 1", ex.getMessage());
-        verifyNoInteractions(attemptRepository);
+
+        // It should fail before saving
+        verify(attemptRepository, never()).save(any());
     }
 
     @Test
@@ -109,12 +229,20 @@ class AnswerServiceTest {
         Option mcWrong = option(22L, "C", false, 3);
         MultipleChoiceQuestion multipleChoiceQuestion = multipleChoiceQuestion(3L, 4, mcCorrect1, mcCorrect2, mcWrong);
 
+        Quiz quiz = buildQuizWithQuestions(List.of(freeTextQuestion, singleChoiceQuestion, multipleChoiceQuestion));
+
         Event event = new Event();
         event.setId(12L);
-        Test test = buildTestWithQuestions(List.of(freeTextQuestion, singleChoiceQuestion, multipleChoiceQuestion));
-        event.setTest(test);
+        event.setQuiz(quiz);
+        event.setStatus(EventStatus.RUNNING);
+
+        Instant now = Instant.now();
+        event.setStartsAt(now.minusSeconds(60));  // already started
+        event.setEndsAt(now.plusSeconds(600));    // ends in the future
 
         User user = new User();
+        user.setId(999L); // optional but good hygiene
+
         EventParticipant participant = new EventParticipant();
         participant.setEvent(event);
         participant.setUser(user);
@@ -122,6 +250,12 @@ class AnswerServiceTest {
         when(eventRepository.findById(12L)).thenReturn(Optional.of(event));
         when(userService.getAuthenticatedUserEntity()).thenReturn(user);
         when(participantRepository.findByEventAndUser(event, user)).thenReturn(Optional.of(participant));
+
+        Attempt existingAttempt = new Attempt();
+        existingAttempt.setStatus(AttemptStatus.IN_PROGRESS);
+        when(attemptRepository.findByParticipant(participant)).thenReturn(Optional.of(existingAttempt));
+
+        // save() returns submitted attempt with id
         when(attemptRepository.save(any(Attempt.class))).thenAnswer(invocation -> {
             Attempt attempt = invocation.getArgument(0);
             attempt.setId(101L);
@@ -134,7 +268,7 @@ class AnswerServiceTest {
                 new AnswerSubmission(3L, List.of(20L, 22L), null)
         ));
 
-        AttemptResponse resp = answerService.submitAttempt(12L, req);
+        AttemptResponse resp = attemptService.submitAttempt(12L, req);
 
         assertEquals(101L, resp.id());
         assertEquals(5, resp.score());
@@ -163,15 +297,19 @@ class AnswerServiceTest {
         assertEquals(9, savedAttempt.getMaxScore());
         assertEquals(AttemptStatus.SUBMITTED, savedAttempt.getStatus());
         assertEquals(3, savedAttempt.getAnswers().size());
+        assertSame(event, savedAttempt.getEvent());
+        assertSame(participant, savedAttempt.getParticipant());
+        assertNotNull(savedAttempt.getStartedAt());
+        assertNotNull(savedAttempt.getSubmittedAt());
     }
 
-    private Test buildTestWithQuestions(List<Question> questions) {
-        Test test = new Test();
-        test.setQuestions(questions);
+    private Quiz buildQuizWithQuestions(List<Question> questions) {
+        Quiz quiz = new Quiz();
+        quiz.setQuestions(questions);
         for (Question question : questions) {
-            question.setTest(test);
+            question.setQuiz(quiz);
         }
-        return test;
+        return quiz;
     }
 
     private FreeTextQuestion freeTextQuestion(Long id, int points, String correctAnswer, boolean caseSensitive) {
