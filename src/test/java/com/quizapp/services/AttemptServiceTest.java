@@ -30,10 +30,72 @@ class AttemptServiceTest {
     @Mock AttemptRepository attemptRepository;
     @Mock UserService userService;
 
-    @InjectMocks
-    AttemptService attemptService;
+    @InjectMocks AttemptService attemptService;
 
     @Captor ArgumentCaptor<Attempt> attemptCaptor;
+
+    @Test
+    void startAttempt_createsAttempt() {
+        Quiz quiz = buildQuizWithQuestions(List.of(freeTextQuestion(1L, 2, "Paris", false)));
+        Event event = buildRunningEventWithQuiz(10L, quiz);
+
+        User user = new User();
+        user.setId(5L);
+
+        EventParticipant participant = new EventParticipant();
+        participant.setEvent(event);
+        participant.setUser(user);
+
+        when(eventRepository.findById(10L)).thenReturn(Optional.of(event));
+        when(userService.getAuthenticatedUserEntity()).thenReturn(user);
+        when(participantRepository.findByEventAndUser(event, user)).thenReturn(Optional.of(participant));
+        when(attemptRepository.existsByParticipant(participant)).thenReturn(false);
+
+        when(attemptRepository.save(any(Attempt.class))).thenAnswer(invocation -> {
+            Attempt attempt = invocation.getArgument(0);
+            attempt.setId(99L);
+            return attempt;
+        });
+
+        var response = attemptService.startAttempt(10L);
+
+        assertEquals(99L, response.attemptId());
+        assertEquals(AttemptStatus.IN_PROGRESS, response.status());
+        assertEquals(event.getEndsAt(), response.endsAt());
+
+        verify(attemptRepository).save(attemptCaptor.capture());
+        Attempt saved = attemptCaptor.getValue();
+        assertSame(event, saved.getEvent());
+        assertSame(participant, saved.getParticipant());
+        assertEquals(AttemptStatus.IN_PROGRESS, saved.getStatus());
+        assertNotNull(saved.getStartedAt());
+    }
+
+    @Test
+    void cancelAttempt_marksAttemptAbandoned() {
+        Quiz quiz = buildQuizWithQuestions(List.of(freeTextQuestion(1L, 2, "Paris", false)));
+        Event event = buildRunningEventWithQuiz(22L, quiz);
+
+        User user = new User();
+        user.setId(8L);
+
+        EventParticipant participant = new EventParticipant();
+        participant.setEvent(event);
+        participant.setUser(user);
+
+        Attempt attempt = new Attempt();
+        attempt.setStatus(AttemptStatus.IN_PROGRESS);
+
+        when(eventRepository.findById(22L)).thenReturn(Optional.of(event));
+        when(userService.getAuthenticatedUserEntity()).thenReturn(user);
+        when(participantRepository.findByEventAndUser(event, user)).thenReturn(Optional.of(participant));
+        when(attemptRepository.findByParticipant(participant)).thenReturn(Optional.of(attempt));
+
+        attemptService.cancelAttempt(22L);
+
+        assertEquals(AttemptStatus.ABANDONED, attempt.getStatus());
+        assertNotNull(attempt.getAbandonedAt());
+    }
 
     @Test
     void submitAttempt_whenAnswersMissing_throws() {
@@ -301,6 +363,18 @@ class AttemptServiceTest {
         assertSame(participant, savedAttempt.getParticipant());
         assertNotNull(savedAttempt.getStartedAt());
         assertNotNull(savedAttempt.getSubmittedAt());
+    }
+
+    private Event buildRunningEventWithQuiz(Long id, Quiz quiz) {
+        Event event = new Event();
+        event.setId(id);
+        event.setQuiz(quiz);
+        event.setStatus(EventStatus.RUNNING);
+
+        Instant now = Instant.now();
+        event.setStartsAt(now.minusSeconds(60));
+        event.setEndsAt(now.plusSeconds(600));
+        return event;
     }
 
     private Quiz buildQuizWithQuestions(List<Question> questions) {
