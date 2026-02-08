@@ -6,10 +6,10 @@ public record EventResponse(
         Long id,
         Long testId,
         String name,
+        String joinCode,
         Instant startsAt,
         Instant endsAt,
         Integer durationSeconds,
-        Integer capacity,
         String hostEmail,
         String status
 ) { }

@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.Optional;
 
 public interface EventParticipantRepository extends JpaRepository<EventParticipant, Long> {
+    boolean existsByEventAndUser(Event event, User user);
     Optional<EventParticipant> findByEventAndUser(Event event, User user);
 }
 

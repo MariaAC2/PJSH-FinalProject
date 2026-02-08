@@ -18,6 +18,9 @@ public class Event {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     private User host;
 
+    @Column(nullable = false)
+    private String name;
+
     @Column(nullable = false, length = 12, unique = true)
     private String joinCode;
 
@@ -25,15 +28,12 @@ public class Event {
     @Column(nullable = false, length = 20)
     private EventStatus status = EventStatus.OPEN;
 
-    // everyone starts at the same server time
     private Instant startsAt;
     private Instant endsAt;
+    private Instant joinClosesAt;
 
     @Column(nullable = false)
     private int durationSeconds; // e.g., 600 for 10 minutes
-
-    // optional
-    private Instant joinClosesAt;
 
     public Long getId() {
         return id;
@@ -57,6 +57,14 @@ public class Event {
 
     public void setHost(User host) {
         this.host = host;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public String getJoinCode() {

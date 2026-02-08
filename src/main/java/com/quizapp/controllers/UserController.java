@@ -1,6 +1,7 @@
 package com.quizapp.controllers;
 
 import com.quizapp.dtos.UserResponse;
+import com.quizapp.dtos.UserUpdateRequest;
 import com.quizapp.services.UserService;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,5 +30,15 @@ public class UserController {
     @GetMapping("/{id}")
     public UserResponse getUser(@PathVariable Long id) {
         return userService.getUserById(id);
+    }
+
+    @PutMapping("/{id}")
+    public UserResponse updateUser(@PathVariable Long id, @RequestBody UserUpdateRequest request) {
+        return userService.updateUser(id, request);
+    }
+
+    @DeleteMapping("/{id}")
+    public void deleteUser(@PathVariable Long id) {
+        userService.deleteUser(id);
     }
 }

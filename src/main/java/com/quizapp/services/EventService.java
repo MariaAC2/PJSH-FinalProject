@@ -4,17 +4,22 @@ import com.quizapp.audit.Auditable;
 import com.quizapp.dtos.CreateEventRequest;
 import com.quizapp.dtos.EventResponse;
 import com.quizapp.entities.Event;
+import com.quizapp.entities.EventParticipant;
 import com.quizapp.entities.Test;
 import com.quizapp.entities.User;
+import com.quizapp.enums.EventStatus;
 import com.quizapp.enums.UserRole;
+import com.quizapp.repositories.EventParticipantRepository;
 import com.quizapp.repositories.EventRepository;
 import com.quizapp.repositories.TestRepository;
 import com.quizapp.repositories.UserRepository;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -24,24 +29,32 @@ public class EventService {
     private final EventRepository eventRepository;
     private final TestRepository testRepository;
     private final UserRepository userRepository;
+    private final EventParticipantRepository participantRepository;
+    private final UserService userService;
 
     public EventService(EventRepository eventRepository,
                         TestRepository testRepository,
-                        UserRepository userRepository) {
+                        UserRepository userRepository, EventParticipantRepository participantRepository, UserService userService) {
         this.eventRepository = eventRepository;
         this.testRepository = testRepository;
         this.userRepository = userRepository;
+        this.participantRepository = participantRepository;
+        this.userService = userService;
     }
 
     @Transactional
     @Auditable(action = "create_event")
+    @PreAuthorize("isAuthenticated()")
     public EventResponse createEvent(CreateEventRequest req) {
         if (req == null) throw new IllegalArgumentException("Request is required");
         if (req.testId() == null) throw new IllegalArgumentException("testId is required");
-        if (req.startsAt() == null || req.endsAt() == null)
-            throw new IllegalArgumentException("startsAt and endsAt are required");
-        if (!req.startsAt().isBefore(req.endsAt()))
-            throw new IllegalArgumentException("startsAt must be before endsAt");
+        if (req.name() == null || req.name().isBlank()) throw new IllegalArgumentException("name is required");
+
+        int duration = (req.durationSeconds() != null) ? req.durationSeconds() : 600;
+        if (duration <= 0) throw new IllegalArgumentException("durationSeconds must be > 0");
+
+        if (req.joinClosesAt() != null && req.joinClosesAt().isBefore(Instant.now()))
+            throw new IllegalArgumentException("joinClosesAt must be in the future");
 
         Test test = testRepository.findById(req.testId())
                 .orElseThrow(() -> new IllegalArgumentException("Test not found"));
@@ -50,7 +63,6 @@ public class EventService {
         User host = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Authenticated user not found in DB"));
 
-        // allow only test owner or ADMIN
         if (!(test.getOwner() != null && test.getOwner().getId() != null && test.getOwner().getId().equals(host.getId()))
                 && host.getRole() != UserRole.ADMIN) {
             throw new AccessDeniedException("Only the test owner or an admin can create events");
@@ -59,15 +71,96 @@ public class EventService {
         Event e = new Event();
         e.setTest(test);
         e.setHost(host);
-        e.setStartsAt(req.startsAt());
-        e.setEndsAt(req.endsAt());
-        if (req.durationSeconds() != null) e.setDurationSeconds(req.durationSeconds());
-        // generate a simple join code
+        e.setName(req.name().trim());
+        e.setDurationSeconds(duration);
+        e.setJoinClosesAt(req.joinClosesAt());
         e.setJoinCode(generateJoinCode());
 
-        Event saved = eventRepository.save(e);
+        e.setStartsAt(null);
+        e.setEndsAt(null);
+        e.setStatus(EventStatus.OPEN);
 
+        Event saved = eventRepository.save(e);
         return toResponse(saved);
+    }
+
+    @Transactional
+    @Auditable(action = "join_event")
+    @PreAuthorize("isAuthenticated()")
+    public EventResponse joinEvent(String joinCode) {
+        if (joinCode == null || joinCode.isBlank())
+            throw new IllegalArgumentException("joinCode is required");
+
+        Event event = eventRepository.findByJoinCode(joinCode.trim().toUpperCase())
+                .orElseThrow(() -> new IllegalArgumentException("Invalid join code"));
+
+        if (event.getStatus() != EventStatus.OPEN)
+            throw new IllegalStateException("Event is not open for joining");
+
+        Instant now = Instant.now();
+
+        if (event.getJoinClosesAt() != null && now.isAfter(event.getJoinClosesAt()))
+            throw new IllegalStateException("Joining is closed");
+
+        if (event.getStartsAt() != null && now.isAfter(event.getStartsAt()))
+            throw new IllegalStateException("Event already started");
+
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Authenticated user not found in DB"));
+
+        if (participantRepository.existsByEventAndUser(event, user))
+            throw new IllegalStateException("Already joined");
+
+        EventParticipant p = new EventParticipant();
+        p.setEvent(event);
+        p.setUser(user);
+
+        participantRepository.save(p);
+
+        return toResponse(event);
+    }
+
+    @Transactional
+    @Auditable(action = "start_event")
+    @PreAuthorize("isAuthenticated()")
+    public void startEvent(Long eventId) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("Event not found"));
+
+        User currentUser = userService.getAuthenticatedUserEntity();
+
+        if (!event.getHost().getId().equals(currentUser.getId())) {
+            throw new AccessDeniedException("Only the host can start own event");
+        }
+
+        if (event.getStatus() != EventStatus.OPEN)
+            throw new IllegalStateException("Event is not open");
+
+
+        Instant now = Instant.now();
+
+        if (event.getJoinClosesAt() != null && !now.isBefore(event.getJoinClosesAt()))
+            throw new IllegalStateException("Joining period has ended");
+
+        event.setStatus(EventStatus.RUNNING);
+        event.setStartsAt(now);
+        event.setEndsAt(now.plusSeconds(event.getDurationSeconds()));
+        event.setJoinClosesAt(now);
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<EventResponse> listAllEvents() {
+        List<Event> events = eventRepository.findAll();
+        return events.stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    public EventResponse getEventById(Long eventId) {
+        Event e = eventRepository.findById(eventId)
+                .orElseThrow(() -> new IllegalArgumentException("Event not found"));
+        return toResponse(e);
     }
 
     public List<EventResponse> listEventsForTest(Long testId) {
@@ -82,11 +175,11 @@ public class EventService {
         return new EventResponse(
                 e.getId(),
                 e.getTest() != null ? e.getTest().getId() : null,
-                null,
+                e.getName(),
+                e.getJoinCode(),
                 e.getStartsAt(),
                 e.getEndsAt(),
                 e.getDurationSeconds(),
-                null,
                 e.getHost() != null ? e.getHost().getEmail() : null,
                 e.getStatus() != null ? e.getStatus().name() : null
         );

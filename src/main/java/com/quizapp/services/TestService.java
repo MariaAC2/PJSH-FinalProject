@@ -21,14 +21,17 @@ public class TestService {
 
     private final TestRepository testRepository;
     private final UserRepository userRepository;
+    private final UserService userService;
 
-    public TestService(TestRepository testRepository, UserRepository userRepository) {
+    public TestService(TestRepository testRepository, UserRepository userRepository, UserService userService) {
         this.testRepository = testRepository;
         this.userRepository = userRepository;
+        this.userService = userService;
     }
 
+    /// Create: new test with questions (and options)
     @Transactional
-    @PreAuthorize("isAuthenticated()") // optional; your SecurityConfig already requires auth
+    @PreAuthorize("isAuthenticated()")
     @Auditable(action = "create_test")
     public TestResponse createTest(CreateTestRequest req) {
         validateCreateTestRequest(req);
@@ -59,7 +62,7 @@ public class TestService {
         return toResponse(saved);
     }
 
-    // Read: get a single test by id
+    /// Get a single test by ID
     @PreAuthorize("isAuthenticated()")
     public TestResponse getTest(Long id) {
         Test test = testRepository.findById(id)
@@ -67,17 +70,16 @@ public class TestService {
         return toResponse(test);
     }
 
-    // Update: replace title/description/questions. Only owner or ADMIN allowed.
+    /// Replace title/description/questions. Only owner or ADMIN allowed.
     @Transactional
     @PreAuthorize("isAuthenticated()")
-    @Auditable(action = "update_test")
     public TestResponse updateTest(Long id, CreateTestRequest req) {
         validateCreateTestRequest(req);
 
         Test test = testRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test not found"));
 
-        User user = getAuthenticatedUser();
+        User user = userService.getAuthenticatedUserEntity();
         if (isOwnerOrAdmin(test, user)) {
             throw new AccessDeniedException("Only the test owner or an admin can update the test");
         }
@@ -99,15 +101,14 @@ public class TestService {
         return toResponse(saved);
     }
 
-    // Delete: only owner or ADMIN allowed
+    /// Delete test by ID. Only owner or ADMIN allowed.
     @Transactional
     @PreAuthorize("isAuthenticated()")
-    @Auditable(action = "delete_test")
     public void deleteTest(Long id) {
         Test test = testRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Test not found"));
 
-        User user = getAuthenticatedUser();
+        User user = userService.getAuthenticatedUserEntity();
         if (isOwnerOrAdmin(test, user)) {
             throw new AccessDeniedException("Only the test owner or an admin can delete the test");
         }
@@ -121,12 +122,7 @@ public class TestService {
         return test.getOwner() == null || test.getOwner().getId() == null || !test.getOwner().getId().equals(user.getId());
     }
 
-    private User getAuthenticatedUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Authenticated user not found in DB"));
-    }
-
+    /// Validation and mapping helpers
     private void validateCreateTestRequest(CreateTestRequest req) {
         if (req == null) throw new IllegalArgumentException("Request is required");
         if (req.title() == null || req.title().trim().isEmpty())
@@ -135,8 +131,8 @@ public class TestService {
         if (req.questions() == null || req.questions().isEmpty())
             throw new IllegalArgumentException("A test must contain at least one question");
 
-        // Optional: max questions constraint
-        // if (req.questions().size() > 50) throw new IllegalArgumentException("Too many questions");
+         if (req.questions().size() > 50)
+             throw new IllegalArgumentException("Too many questions");
     }
 
     private Question mapQuestion(CreateQuestionRequest qReq, int position) {
@@ -161,9 +157,7 @@ public class TestService {
         q.setPrompt(qReq.prompt().trim());
         q.setPoints(points);
         q.setPosition(position);
-
-        // If you want to store a "model answer":
-        // q.setCorrectText(qReq.correctText());
+        q.setCorrectAnswer(qReq.correctAnswer());
 
         return q;
     }
@@ -237,17 +231,7 @@ public class TestService {
     private TestResponse toResponse(Test test) {
         List<QuestionResponse> qs = new ArrayList<>();
         for (Question q : test.getQuestions()) {
-            List<OptionResponse> opts = List.of();
-
-            // build option DTOs for choice questions
-            if (q instanceof ChoiceQuestion cq) {
-                List<OptionResponse> tmp = new ArrayList<>();
-                for (Option o : cq.getOptions()) {
-                    // OptionResponse has (Long id, String text, boolean correct) — position is not part of the DTO
-                    tmp.add(new OptionResponse(o.getId(), o.getOptionText(), o.isCorrect()));
-                }
-                opts = tmp;
-            }
+            List<OptionResponse> opts = getOptionResponses(q);
 
             // For free-text questions we want to expose the correct answer and case sensitivity
             String correctText = null;
@@ -270,5 +254,20 @@ public class TestService {
         }
 
         return new TestResponse(test.getId(), test.getTitle(), test.getDescription(), qs);
+    }
+
+    private static List<OptionResponse> getOptionResponses(Question q) {
+        List<OptionResponse> opts = List.of();
+
+        // build option DTOs for choice questions
+        if (q instanceof ChoiceQuestion cq) {
+            List<OptionResponse> tmp = new ArrayList<>();
+            for (Option o : cq.getOptions()) {
+                // OptionResponse has (Long id, String text, boolean correct) — position is not part of the DTO
+                tmp.add(new OptionResponse(o.getId(), o.getOptionText(), o.isCorrect()));
+            }
+            opts = tmp;
+        }
+        return opts;
     }
 }

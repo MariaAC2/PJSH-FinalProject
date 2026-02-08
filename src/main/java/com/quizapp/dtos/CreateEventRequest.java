@@ -4,10 +4,8 @@ import java.time.Instant;
 
 public record CreateEventRequest(
         Long testId,
-        Instant startsAt,
-        Instant endsAt,
+        String name,
         Integer durationSeconds,
-        Integer capacity,
-        String name
+        Instant joinClosesAt
 ) { }
 

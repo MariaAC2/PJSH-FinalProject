@@ -10,6 +10,6 @@ public record CreateQuestionRequest(
         int points,
         int position,
         List<CreateOptionRequest> options,
-        String correctText,
+        String correctAnswer,
         boolean caseSensitive
 ) { }

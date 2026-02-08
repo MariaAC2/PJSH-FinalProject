@@ -2,6 +2,7 @@ package com.quizapp.controllers;
 
 import com.quizapp.dtos.CreateEventRequest;
 import com.quizapp.dtos.EventResponse;
+import com.quizapp.dtos.JoinEventRequest;
 import com.quizapp.dtos.LeaderboardEntry;
 import com.quizapp.services.EventService;
 import com.quizapp.services.LeaderboardService;
@@ -26,14 +27,35 @@ public class EventController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ResponseEntity<EventResponse> createEvent(@RequestBody CreateEventRequest req) {
-        EventResponse resp = eventService.createEvent(req);
-        return ResponseEntity.created(URI.create("/api/events/" + resp.id())).body(resp);
+    public EventResponse createEvent(@RequestBody CreateEventRequest req) {
+        return eventService.createEvent(req);
+    }
+
+    @PostMapping("/join")
+    @ResponseStatus(HttpStatus.OK)
+    public EventResponse join(@RequestBody JoinEventRequest req) {
+        return eventService.joinEvent(req.joinCode());
+    }
+
+    @PostMapping("/start/{eventId}")
+    @ResponseStatus(HttpStatus.OK)
+    public void startEvent(@PathVariable Long eventId) {
+        eventService.startEvent(eventId);
     }
 
     @GetMapping("/test/{testId}")
     public List<EventResponse> listForTest(@PathVariable Long testId) {
         return eventService.listEventsForTest(testId);
+    }
+
+    @GetMapping("/{eventId}")
+    public EventResponse getEvent(@PathVariable Long eventId) {
+        return eventService.getEventById(eventId);
+    }
+
+    @GetMapping()
+    public List<EventResponse> listAllEvents() {
+        return eventService.listAllEvents();
     }
 
     @GetMapping("/{eventId}/leaderboard")

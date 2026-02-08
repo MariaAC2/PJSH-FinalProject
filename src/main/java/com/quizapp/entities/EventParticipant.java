@@ -22,13 +22,6 @@ public class EventParticipant {
     @ManyToOne(fetch = FetchType.LAZY)
     private User user;
 
-    // For guest flow (optional)
-    @Column(length = 80)
-    private String guestName;
-
-    @Column(length = 64)
-    private String guestToken;
-
     @Column(nullable = false, updatable = false)
     private Instant joinedAt = Instant.now();
 
@@ -54,22 +47,6 @@ public class EventParticipant {
 
     public void setUser(User user) {
         this.user = user;
-    }
-
-    public String getGuestName() {
-        return guestName;
-    }
-
-    public void setGuestName(String guestName) {
-        this.guestName = guestName;
-    }
-
-    public String getGuestToken() {
-        return guestToken;
-    }
-
-    public void setGuestToken(String guestToken) {
-        this.guestToken = guestToken;
     }
 
     public Instant getJoinedAt() {

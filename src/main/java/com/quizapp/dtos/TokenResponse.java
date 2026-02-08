@@ -1,3 +1,3 @@
 package com.quizapp.dtos;
 
-public record TokenResponse(String accessToken) { }
+public record TokenResponse(String token) { }
