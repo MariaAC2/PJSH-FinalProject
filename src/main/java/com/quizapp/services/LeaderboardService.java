@@ -18,6 +18,7 @@ public class LeaderboardService {
         this.attemptRepository = attemptRepository;
     }
 
+    /// Retrieves the top attempts for a given event and maps them to leaderboard entries
     public List<LeaderboardEntry> topForEvent(Long eventId, int limit) {
         List<Attempt> attempts = attemptRepository.findTopSubmittedByEventId(eventId, PageRequest.of(0, limit));
         return attempts.stream()

@@ -33,10 +33,9 @@ public class AttemptService {
         this.userService = userService;
     }
 
-    // =========================
-    // Grading (unchanged)
-    // =========================
-
+    /// Grade a single question based on its type and the submitted answer.
+    /// Returns the created Answer entity, the grading result for this question, and the points awarded.
+    /// Used by submitAttempt() to grade each question in the quiz.
     private GradeOutcome gradeQuestion(Question q, AnswerSubmission sub, Attempt attempt) {
         if (q instanceof FreeTextQuestion ftq) return gradeFreeText(ftq, sub, attempt);
         if (q instanceof SingleChoiceQuestion scq) return gradeSingleChoice(scq, sub, attempt);
@@ -44,6 +43,8 @@ public class AttemptService {
         throw new IllegalStateException("Unknown question type: " + q.getClass().getSimpleName());
     }
 
+    /// Free text grading: trim and compare to correct answer, with optional case sensitivity.
+    /// Full points if correct, otherwise 0. Null or blank answers are treated as incorrect.
     private GradeOutcome gradeFreeText(FreeTextQuestion q, AnswerSubmission sub, Attempt attempt) {
         int qPoints = q.getPoints();
         String answerText = (sub != null) ? sub.textAnswer() : null;
@@ -71,6 +72,9 @@ public class AttemptService {
         );
     }
 
+    /// Single choice grading: full points if exactly one option is selected
+    /// and it is correct, otherwise 0.
+    /// No penalty for wrong answers, but no partial credit for multiple selections.
     private GradeOutcome gradeSingleChoice(SingleChoiceQuestion q, AnswerSubmission sub, Attempt attempt) {
         int qPoints = q.getPoints();
 
@@ -116,6 +120,11 @@ public class AttemptService {
         );
     }
 
+    /// Multiple choice grading:
+    /// +1 for each correct option selected,
+    /// -1 for each incorrect option selected,
+    /// minimum 0.
+    /// Then prorate to the question's point value based on the number of correct options.
     private GradeOutcome gradeMultipleChoice(MultipleChoiceQuestion q, AnswerSubmission sub, Attempt attempt) {
         int qPoints = q.getPoints();
 
@@ -171,9 +180,8 @@ public class AttemptService {
         );
     }
 
-    // =========================
-    // Start Attempt
-    // =========================
+    /// Start attempt: create a new Attempt with IN_PROGRESS status.
+    /// Enforces that no attempt exists yet for this participant, and that the event is accepting submissions.
     @Transactional
     @Auditable(action = "start_attempt")
     public AttemptStartResponse startAttempt(Long eventId) {
@@ -195,10 +203,9 @@ public class AttemptService {
         return new AttemptStartResponse(saved.getId(), saved.getStatus(), ctx.event().getEndsAt());
     }
 
-    // =========================
-    // Submit Attempt
-    // =========================
-
+    /// Submit attempt: grade answers, set status to SUBMITTED, and save.
+    /// Enforces that the attempt is IN_PROGRESS and that the event is still accepting submissions.
+    /// Answers are replaced on each submission, allowing users to change their answers until they submit.
     @Transactional
     @Auditable(action = "submit_attempt")
     public AttemptResponse submitAttempt(Long eventId, AttemptSubmissionRequest req) {
@@ -235,6 +242,7 @@ public class AttemptService {
         return new AttemptResponse(saved.getId(), saved.getScore(), saved.getMaxScore(), saved.getStatus(), results);
     }
 
+    /// Abandon attempt: set status to ABANDONED and prevent further submission. Does not delete the attempt or answers, to preserve history and auditability.
     @Transactional
     @Auditable(action = "cancel_attempt")
     public void cancelAttempt(Long eventId) {
@@ -273,10 +281,6 @@ public class AttemptService {
         return byQ;
     }
 
-    // =========================
-    // Context / lifecycle checks
-    // =========================
-
     private AttemptContext loadAttemptContextBase(Long eventId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new IllegalArgumentException("Event not found"));
@@ -295,6 +299,7 @@ public class AttemptService {
         return new AttemptContext(event, participant, quiz);
     }
 
+    /// Checks that no attempt exists yet for this participant, and that the event is accepting submissions. Used by startAttempt() to validate before creating a new attempt.
     private AttemptContext loadAttemptContextForStart(Long eventId) {
         AttemptContext ctx = loadAttemptContextBase(eventId);
 
@@ -305,6 +310,7 @@ public class AttemptService {
         return ctx;
     }
 
+    /// Checks that an attempt exists and is IN_PROGRESS, and that the event is still accepting submissions. Used by submitAttempt() to validate before grading.
     private AttemptContext loadAttemptContextForSubmit(Long eventId) {
         AttemptContext ctx = loadAttemptContextBase(eventId);
 
@@ -323,7 +329,6 @@ public class AttemptService {
 
         return ctx;
     }
-
 
     private void enforceEventIsAcceptingSubmissions(Event event) {
         // clearer message for cancellation
@@ -367,10 +372,7 @@ public class AttemptService {
         }
     }
 
-    // =========================
-    // Attempt creation
-    // =========================
-
+    /// Create a new Attempt entity with SUBMITTED status and timestamps set to now. Used by submitAttempt() after grading is done.
     private Attempt newSubmittedAttempt(Event event, EventParticipant participant) {
         Attempt attempt = new Attempt();
         attempt.setEvent(event);
@@ -384,9 +386,6 @@ public class AttemptService {
         return attempt;
     }
 
-    // =========================
-    // Helper record (keep it inside the service)
-    // =========================
-
+    /// Helper record
     private record AttemptContext(Event event, EventParticipant participant, Quiz quiz) {}
 }

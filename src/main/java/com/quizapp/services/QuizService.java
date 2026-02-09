@@ -135,6 +135,7 @@ public class QuizService {
              throw new IllegalArgumentException("Too many questions");
     }
 
+    /// Validates question request and maps to entity. Position is required for ordering.
     private Question mapQuestion(CreateQuestionRequest qReq, int position) {
         if (qReq == null) throw new IllegalArgumentException("Question is required");
         if (qReq.type() == null) throw new IllegalArgumentException("Question type is required");
@@ -151,6 +152,7 @@ public class QuizService {
         };
     }
 
+    /// Maps free-text question request to entity. Validates that correct answer is provided.
     private FreeTextQuestion mapFreeText(CreateQuestionRequest qReq, int position, int points) {
         FreeTextQuestion q = new FreeTextQuestion();
         q.setType(QuestionType.FREE_TEXT);
@@ -162,6 +164,7 @@ public class QuizService {
         return q;
     }
 
+    /// Maps single-choice question request to entity. Validates that options are provided and exactly 1 is correct.
     private SingleChoiceQuestion mapSingleChoice(CreateQuestionRequest qReq, int position, int points) {
         validateOptions(qReq.options(), true);
 
@@ -175,6 +178,7 @@ public class QuizService {
         return q;
     }
 
+    /// Maps multiple-choice question request to entity. Validates that options are provided and at least 1 is correct.
     private MultipleChoiceQuestion mapMultipleChoice(CreateQuestionRequest qReq, int position, int points) {
         validateOptions(qReq.options(), false);
 

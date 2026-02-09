@@ -42,6 +42,7 @@ public class EventService {
         this.userService = userService;
     }
 
+    /// Creates a new event for a quiz. Only the quiz owner or an admin can create events.
     @Transactional
     @Auditable(action = "create_event")
     @PreAuthorize("isAuthenticated()")
@@ -84,6 +85,7 @@ public class EventService {
         return toResponse(saved);
     }
 
+    /// Allows a user to join an event using a join code. The event must be open and within the joining period.
     @Transactional
     @Auditable(action = "join_event")
     @PreAuthorize("isAuthenticated()")
@@ -121,6 +123,7 @@ public class EventService {
         return toResponse(event);
     }
 
+    /// Allows the host or an admin to start the event. The event must be open and within the joining period.
     @Transactional
     @Auditable(action = "start_event")
     @PreAuthorize("isAuthenticated()")
@@ -149,6 +152,7 @@ public class EventService {
         event.setJoinClosesAt(now);
     }
 
+    /// Allows the host or an admin to close the event. The event must be open and within the joining period.
     @Transactional
     @Auditable(action = "close_event")
     @PreAuthorize("isAuthenticated()")
@@ -171,6 +175,7 @@ public class EventService {
         event.setJoinClosesAt(Instant.now());
     }
 
+    /// Allows a participant to leave an event before it starts. The event must be open and within the joining period.
     @Transactional
     @Auditable(action = "leave_event")
     @PreAuthorize("isAuthenticated()")
@@ -190,6 +195,7 @@ public class EventService {
         participantRepository.delete(p);
     }
 
+    /// Allows the host or an admin to cancel the event. The event must be open or running.
     @Transactional
     @Auditable(action = "cancel_event")
     @PreAuthorize("isAuthenticated()")
@@ -218,6 +224,7 @@ public class EventService {
         event.setEndsAt(now);
     }
 
+    /// Lists all events. Only admins can see all events. Regular users can only see events they are hosting or participating in.
     @PreAuthorize("hasRole('ADMIN')")
     public List<EventResponse> listAllEvents() {
         List<Event> events = eventRepository.findAll();
@@ -226,12 +233,14 @@ public class EventService {
                 .collect(Collectors.toList());
     }
 
+    /// Gets event details by ID. Only admins, the host, or participants can see the event details.
     public EventResponse getEventById(Long eventId) {
         Event e = eventRepository.findById(eventId)
                 .orElseThrow(() -> new IllegalArgumentException("Event not found"));
         return toResponse(e);
     }
 
+    /// Lists events for a specific quiz. Only admins or the quiz owner can see the events.
     public List<EventResponse> listEventsForTest(Long testId) {
         List<Event> events = eventRepository.findAll();
         return events.stream()
@@ -254,6 +263,7 @@ public class EventService {
         );
     }
 
+    /// Generates a random 8-character alphanumeric join code.
     private String generateJoinCode() {
         // very small join code generator — 8-char alphanumeric
         String alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
