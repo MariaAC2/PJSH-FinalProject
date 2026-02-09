@@ -152,7 +152,7 @@ public class EventService {
         event.setJoinClosesAt(now);
     }
 
-    /// Allows the host or an admin to close the event. The event must be open and within the joining period.
+    /// Allows the host or an admin to close the event from running. The event must be open and within the joining period.
     @Transactional
     @Auditable(action = "close_event")
     @PreAuthorize("isAuthenticated()")
@@ -195,7 +195,7 @@ public class EventService {
         participantRepository.delete(p);
     }
 
-    /// Allows the host or an admin to cancel the event. The event must be open or running.
+    /// Allows the host or an admin to cancel the event before it starts. The event must be open or running.
     @Transactional
     @Auditable(action = "cancel_event")
     @PreAuthorize("isAuthenticated()")
@@ -209,6 +209,9 @@ public class EventService {
             throw new AccessDeniedException("Only the host or admin can cancel event");
         }
 
+        if (event.getStatus() == EventStatus.RUNNING) {
+            throw new IllegalStateException("Cannot cancel a running event");
+        }
         if (event.getStatus() == EventStatus.CANCELLED) {
             return;
         }
