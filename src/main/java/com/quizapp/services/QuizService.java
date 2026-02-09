@@ -50,7 +50,7 @@ public class QuizService {
         int position = 0;
         for (CreateQuestionRequest qReq : req.questions()) {
             Question q = mapQuestion(qReq, position);
-            // important: link both sides
+            // link both sides
             q.setQuiz(quiz);
             quiz.getQuestions().add(q);
             position++;

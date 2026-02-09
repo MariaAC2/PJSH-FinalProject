@@ -242,7 +242,8 @@ public class AttemptService {
         return new AttemptResponse(saved.getId(), saved.getScore(), saved.getMaxScore(), saved.getStatus(), results);
     }
 
-    /// Abandon attempt: set status to ABANDONED and prevent further submission. Does not delete the attempt or answers, to preserve history and auditability.
+    /// Abandon attempt: set status to ABANDONED and prevent further submission.
+    /// Does not delete the attempt or answers, to preserve history and auditability.
     @Transactional
     @Auditable(action = "cancel_attempt")
     public void cancelAttempt(Long eventId) {
@@ -259,6 +260,7 @@ public class AttemptService {
 
         attempt.setStatus(AttemptStatus.ABANDONED);
         attempt.setAbandonedAt(Instant.now());
+        participantRepository.delete(ctx.participant());
     }
 
     private static Map<Long, AnswerSubmission> submissionsByQuestionId(
